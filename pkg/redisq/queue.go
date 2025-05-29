@@ -62,13 +62,14 @@ func (c *redisClient)Dequeue() (TaskPayload, error) {
 		}
 		return TaskPayload{}, fmt.Errorf("failed to dequeue task: %w", err)
 	 }
-	 if len(payloadBytes)==2{
-		return task, nil
+	 if len(payloadBytes)!=2{
+		return TaskPayload{}, fmt.Errorf("unexpected result from BRPop for queue %s: expected 2 elements, got %d", c.queueName, len(payloadBytes))
+
 	 }
 	 results:=[]byte(payloadBytes[1])
 	 if err:=json.Unmarshal(results, &task); err != nil {
 
-		return task, fmt.Errorf("failed to unmarshal payload: %w", err)
+        return TaskPayload{}, fmt.Errorf("failed to unmarshal task payload from %s: %w. Raw data: %s", c.queueName, err, string(results))
 	 }
 	 fmt.Printf("Task dequeued: %s\n", task.TaskID)
 	return task, nil
@@ -80,7 +81,10 @@ func (c *redisClient) EnqueueWithDelay(payload TaskPayload, delay int64) error {
 	 }
 	 go func(){
 		time.Sleep(time.Duration(delay) * time.Second)
-		c.Enqueue(payload)
+		 err:=c.Enqueue(payload)
+		 if err != nil {
+			 fmt.Printf( "failed to enqueue task with delay: %v", err)
+		 }
 	 }()
 	 return nil
 }

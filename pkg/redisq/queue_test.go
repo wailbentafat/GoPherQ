@@ -123,7 +123,7 @@ func TestEnqueueWithDelay(t *testing.T) {
 		Methode: "GET",
 	}
 
-	delaySeconds := int64(1) 
+	delaySeconds := int64(4) 
 
 	err = client.EnqueueWithDelay(taskToDelay, delaySeconds)
 	require.NoError(t, err, "EnqueueWithDelay returned an error")
