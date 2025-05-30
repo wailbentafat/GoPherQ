@@ -80,10 +80,45 @@ func (wp *workerpool) Work() Workerpool {
 	go func() {
 		defer wp.wg.Done()
 		var taskWg =new(sync.WaitGroup)
-		for i:=int64(0)
+		for i:=int64(0);i<wp.numberOfworker;i++{
+			wp.semaphore<-struct{}{}
+			taskWg.Add(1)
+			go func (workerId int64){
+				defer func (){
+					<-wp.semaphore
+					taskWg.Done()
+				}()
+				for {
+					select{
+						case<-wp.Ctx.Done():
+							log.Printf("Worker pool context canceled, worker %d exiting", workerId)
+							return
+						case Taskinput, ok := <-wp.inChan:
+							if !ok {
+								log.Printf("Worker pool input channel closed, worker %d exiting", workerId)
+								return
+							}
+							log.Printf("Worker %d received task: %v", workerId, Taskinput)
+							if err:=wp.workerTask.Run(Taskinput,wp.internaloutChan); err != nil {
+								wp.onceErr.Do(func() {
+									wp.err = err
+									log.Printf("Error executing task in worker %d: %v", workerId, err)
+									wp.cancel()
+								})
+							}
+							log.Printf("Worker %d finished task: %v", workerId, Taskinput)
+
+					}
+				}
+			}(i)
+		}
+		taskWg.Wait()
+		log.Println("All workers have finished their tasks, closing worker pool")
 
 
 
+}()
+	return wp
 }
 
 func (wp *workerpool) OutChannel(t reflect.Type, out chan interface{}) {

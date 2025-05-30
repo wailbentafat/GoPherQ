@@ -17,5 +17,5 @@ type ApiTaskResult struct {
     Duration   time.Duration
 }
 type Task interface{
-	Run (in interface{}, out chan<- interface{})
+	Run (in interface{}, out chan<- interface{}) error
 }
