@@ -2,6 +2,7 @@ package workerpool
 
 import (
 	"context"
+	"log"
 	"os"
 	"reflect"
 	"sync"
@@ -10,38 +11,117 @@ import (
 	"github.com/wailbentafat/go-worker-pool/pkg/task"
 )
 
-
-
 const (
-	DefaultWorkerCount=5
-	DefaultQueueName="default_tasks_queue"
-	DefaultQueueTimeout=5 * 60 
-	DefaultQueueDelay=0 * time.Second
-	sigChanBufferSize=1
+	DefaultWorkerCount  = 5
+	DefaultQueueName    = "default_tasks_queue"
+	DefaultQueueTimeout = 5 * 60
+	DefaultQueueDelay   = 0 * time.Second
+	sigChanBufferSize   = 1
 )
-type Workerpool interface{
- Send(interface{})
- RecieveFrom(t reflect.Type,inworker ...Workerpool)
- Work() Workerpool
- OutChannel(t reflect.Type,out chan interface{} )
- CancelOnsignal(signals ...os.Signal) Workerpool
- Close() error
+
+type Workerpool interface {
+	Send(interface{})
+	RecieveFrom(t reflect.Type, inworker ...Workerpool) Workerpool
+	Work() Workerpool
+	OutChannel(t reflect.Type, out chan interface{})
+	CancelOnsignal(signals ...os.Signal) Workerpool
+	Close() error
+}
+type workerpool struct {
+	Ctx             context.Context
+	workerTask      task.Task
+	err             error
+	numberOfworker  int64
+	inChan          chan interface{}
+	internaloutChan chan interface{}
+	outtypedchan    map[reflect.Type][]chan interface{}
+	sigChan         chan os.Signal
+	cancel          context.CancelFunc
+	semaphore       chan struct{}
+	isLeader        bool
+	wg              *sync.WaitGroup
+	onceErr         *sync.Once
+	onceCloseOut    *sync.Once
+}
+
+func (wp *workerpool) RecieveFrom(t reflect.Type, inworker ...Workerpool) Workerpool  {
+	wp.isLeader = false
+	for _, worker := range inworker {
+		worker.OutChannel(t, wp.inChan)
+	}
+	return wp
+}
+
+func (wp *workerpool) Send( in interface{}) {
+	select{
+		case<-wp.Ctx.Done():
+			log.Printf("Worker pool  context canceled mkch tasks wkhdokrin" +
+				" cannot send task: %v", in)
+				return
+		default:		
+	}
+	select{
+	case<-wp.Ctx.Done():
+		log.Printf("Worker pool context canceled, cannot send task: %v", in)
+		return
+	case wp.inChan <- in:
+		log.Printf("Task sent to worker pool: %v", in)
+	}
+}
+func (wp *workerpool) runOutChanMux() {
+	panic("implement runOutChanMux function")
+}
+
+func (wp *workerpool) Work() Workerpool {
+	wp.wg.Add(1)
+	go wp.runOutChanMux()
+	// wp.wg.Add(int(wp.numberOfworker))
+	wp.wg.Add(1)
+	go func() {
+		defer wp.wg.Done()
+		var taskWg =new(sync.WaitGroup)
+		for i:=int64(0)
+
 
 
 }
-type workerpool struct {
-	Ctx context.Context
-	workerTask  task.Task
-	err error
-	numberOfworker int64
-	inChan chan interface{}
-	internaloutChan chan interface{}
-	outtypedchan map[reflect.Type]chan interface{}
-	sigChan  chan os.Signal
-	cancel context.CancelFunc
-	semaphore chan struct{}
-	isLeader bool
-	wg *sync.WaitGroup
-	onceErr *sync.Once
-	onceCloseOut *sync.Once
+
+func (wp *workerpool) OutChannel(t reflect.Type, out chan interface{}) {
+	if _,ok :=wp.outtypedchan[t];!ok{
+		wp.outtypedchan[t] =[]chan interface{}{out}
+	}else{
+		wp.outtypedchan[t] = append(wp.outtypedchan[t], out)
+	}
+}
+
+func (wp *workerpool) Close() error {
+
+	return wp.err
+}
+
+func (wp *workerpool) CancelOnsignal(signals ...os.Signal) Workerpool {
+	
+	return wp
+}
+func NewWorkerPool(ctx context.Context, workerexcuter task.Task, numberofworker int64) Workerpool {
+	if numberofworker <= 0 {
+		numberofworker = DefaultWorkerCount
+	}
+	c, cancel := context.WithCancel(ctx)
+	return &workerpool{
+
+		Ctx:             c,
+		workerTask:      workerexcuter,
+		numberOfworker:  numberofworker,
+		inChan:          make(chan interface{}, 100),
+		internaloutChan: make(chan interface{}, 100),
+		outtypedchan:    make(map[reflect.Type][]chan interface{}),
+		sigChan:         make(chan os.Signal, sigChanBufferSize),
+		cancel:          cancel,
+		semaphore:       make(chan struct{}, numberofworker),
+		isLeader:        true,
+		wg:              &sync.WaitGroup{},
+		onceErr:         &sync.Once{},
+		onceCloseOut:    &sync.Once{},
+	}
 }
