@@ -2,8 +2,10 @@ package workerpool
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
+	"os/signal"
 	"reflect"
 	"sync"
 	"time"
@@ -44,24 +46,43 @@ type workerpool struct {
 	onceCloseOut    *sync.Once
 }
 
-func (wp *workerpool) RecieveFrom(t reflect.Type, inworker ...Workerpool) Workerpool  {
+func (wp *workerpool) RecieveFrom(t reflect.Type, inworker ...Workerpool) Workerpool {
 	wp.isLeader = false
 	for _, worker := range inworker {
 		worker.OutChannel(t, wp.inChan)
 	}
 	return wp
 }
-
-func (wp *workerpool) Send( in interface{}) {
-	select{
-		case<-wp.Ctx.Done():
-			log.Printf("Worker pool  context canceled mkch tasks wkhdokrin" +
-				" cannot send task: %v", in)
-				return
-		default:		
+func (wp *workerpool) out(outputData interface{}) error {
+	outputType := reflect.TypeOf(outputData)
+	if outputType == nil {
 	}
-	select{
-	case<-wp.Ctx.Done():
+
+	selectedChans, specificTypeExists := wp.outtypedchan[outputType]
+
+	if !specificTypeExists || len(selectedChans) == 0 {
+		return nil
+	}
+
+	select {
+	case <-wp.Ctx.Done():
+		return wp.Ctx.Err()
+	default:
+		teevalue(outputData, selectedChans...)
+		return nil
+	}
+}
+
+func (wp *workerpool) Send(in interface{}) {
+	select {
+	case <-wp.Ctx.Done():
+		log.Printf("Worker pool  context canceled mkch tasks wkhdokrin"+
+			" cannot send task: %v", in)
+		return
+	default:
+	}
+	select {
+	case <-wp.Ctx.Done():
 		log.Printf("Worker pool context canceled, cannot send task: %v", in)
 		return
 	case wp.inChan <- in:
@@ -69,7 +90,38 @@ func (wp *workerpool) Send( in interface{}) {
 	}
 }
 func (wp *workerpool) runOutChanMux() {
-	panic("implement runOutChanMux function")
+	defer wp.wg.Done()
+	for {
+		select {
+		case <-wp.Ctx.Done():
+			log.Println("OutChanMux shutting down due to context cancellation")
+			for range wp.internaloutChan {
+
+			}
+			return
+		case outdata, ok := <-wp.internaloutChan:
+			if !ok {
+				log.Println("OutChanMux shutting down due to context cancellation")
+				return
+			}
+			if err := wp.out(outdata); err != nil {
+				wp.onceErr.Do(func() {
+					wp.err = err
+					log.Println("hbss context  wla err f chun out max ")
+				})
+
+			}
+
+		}
+	}
+}
+func (wp *workerpool) ReceiveFrom(t reflect.Type, inWorker ...Workerpool) Workerpool {
+	wp.isLeader = false
+	for _, worker := range inWorker {
+		worker.OutChannel(t, wp.inChan)
+	}
+	return wp
+
 }
 
 func (wp *workerpool) Work() Workerpool {
@@ -79,34 +131,34 @@ func (wp *workerpool) Work() Workerpool {
 	wp.wg.Add(1)
 	go func() {
 		defer wp.wg.Done()
-		var taskWg =new(sync.WaitGroup)
-		for i:=int64(0);i<wp.numberOfworker;i++{
-			wp.semaphore<-struct{}{}
+		var taskWg = new(sync.WaitGroup)
+		for i := int64(0); i < wp.numberOfworker; i++ {
+			wp.semaphore <- struct{}{}
 			taskWg.Add(1)
-			go func (workerId int64){
-				defer func (){
+			go func(workerId int64) {
+				defer func() {
 					<-wp.semaphore
 					taskWg.Done()
 				}()
 				for {
-					select{
-						case<-wp.Ctx.Done():
-							log.Printf("Worker pool context canceled, worker %d exiting", workerId)
+					select {
+					case <-wp.Ctx.Done():
+						log.Printf("Worker pool context canceled, worker %d exiting", workerId)
+						return
+					case Taskinput, ok := <-wp.inChan:
+						if !ok {
+							log.Printf("Worker pool input channel closed, worker %d exiting", workerId)
 							return
-						case Taskinput, ok := <-wp.inChan:
-							if !ok {
-								log.Printf("Worker pool input channel closed, worker %d exiting", workerId)
-								return
-							}
-							log.Printf("Worker %d received task: %v", workerId, Taskinput)
-							if err:=wp.workerTask.Run(Taskinput,wp.internaloutChan); err != nil {
-								wp.onceErr.Do(func() {
-									wp.err = err
-									log.Printf("Error executing task in worker %d: %v", workerId, err)
-									wp.cancel()
-								})
-							}
-							log.Printf("Worker %d finished task: %v", workerId, Taskinput)
+						}
+						log.Printf("Worker %d received task: %v", workerId, Taskinput)
+						if err := wp.workerTask.Run(Taskinput, wp.internaloutChan); err != nil {
+							wp.onceErr.Do(func() {
+								wp.err = err
+								log.Printf("Error executing task in worker %d: %v", workerId, err)
+								wp.cancel()
+							})
+						}
+						log.Printf("Worker %d finished task: %v", workerId, Taskinput)
 
 					}
 				}
@@ -115,28 +167,71 @@ func (wp *workerpool) Work() Workerpool {
 		taskWg.Wait()
 		log.Println("All workers have finished their tasks, closing worker pool")
 
-
-
-}()
+	}()
 	return wp
 }
 
 func (wp *workerpool) OutChannel(t reflect.Type, out chan interface{}) {
-	if _,ok :=wp.outtypedchan[t];!ok{
-		wp.outtypedchan[t] =[]chan interface{}{out}
-	}else{
+	if _, ok := wp.outtypedchan[t]; !ok {
+		wp.outtypedchan[t] = []chan interface{}{out}
+	} else {
 		wp.outtypedchan[t] = append(wp.outtypedchan[t], out)
 	}
 }
 
 func (wp *workerpool) Close() error {
-
+	log.Printf("initiiling the closing ")
+	wp.cancel()
+	wp.closeChannels()
+	if wp.Ctx.Err() != nil && !errors.Is(wp.Ctx.Err(), context.Canceled) && !errors.Is(wp.Ctx.Err(), context.DeadlineExceeded) {
+		if wp.err == nil {
+			return wp.Ctx.Err()
+		}
+		return nil
+	}
 	return wp.err
 }
 
+func (wp *workerpool) closeChannels() {
+	wp.onceCloseOut.Do(func() {
+		if wp.inChan != nil {
+			close(wp.inChan)
+		}
+		if wp.internaloutChan != nil {
+			close(wp.internaloutChan)
+		}
+	})
+	wp.wg.Wait()
+}
+func (wp *workerpool) waitForSignal(signale ...os.Signal) {
+	wp.wg.Add(1)
+	go func() {
+		defer wp.wg.Done()
+		select {
+		case s := <-wp.sigChan:
+			log.Printf("raj ja signal %v cancel context dok ", s)
+		case <-wp.Ctx.Done():
+			log.Printf("context canceled")
+		}
+	}()
+	signal.Notify(wp.sigChan, signale...)
+}
+
 func (wp *workerpool) CancelOnsignal(signals ...os.Signal) Workerpool {
-	
+	if len(signals) > 0 {
+		wp.waitForSignal(signals...)
+	}
 	return wp
+}
+func teevalue(value interface{}, destination ...chan interface{}) {
+	for _, dest := range destination {
+		select {
+		case dest <- value:
+		default:
+			log.Println("mrhich tb3t l destination channel ray habssa")
+		}
+	}
+
 }
 func NewWorkerPool(ctx context.Context, workerexcuter task.Task, numberofworker int64) Workerpool {
 	if numberofworker <= 0 {
