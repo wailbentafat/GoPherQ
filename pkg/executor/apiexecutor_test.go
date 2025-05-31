@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/wailbentafat/go-worker-pool/pkg/task"
+	"github.com/wailbentafat/GoPherQ/pkg/task"
 )
 
 

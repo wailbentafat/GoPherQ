@@ -1,4 +1,4 @@
-module github.com/wailbentafat/go-worker-pool
+module github.com/wailbentafat/GoPherQ
 
 go 1.16
 

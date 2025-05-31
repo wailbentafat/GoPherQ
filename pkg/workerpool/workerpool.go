@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wailbentafat/go-worker-pool/pkg/task"
+	"github.com/wailbentafat/GoPherQ/pkg/task"
 )
 
 const (
