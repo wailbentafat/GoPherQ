@@ -11,9 +11,9 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/wailbentafat/go-worker-pool/pkg/executor"
-	"github.com/wailbentafat/go-worker-pool/pkg/redisq"
-	"github.com/wailbentafat/go-worker-pool/pkg/workerpool"
+	"github.com/wailbentafat/GoPherQ/pkg/executor"
+	"github.com/wailbentafat/GoPherQ/pkg/redisq"
+	"github.com/wailbentafat/GoPherQ/pkg/workerpool"
 )
 
 const (
