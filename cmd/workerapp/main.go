@@ -78,7 +78,6 @@ func main() {
 					continue
 				}
 
-				log.Printf("Task dequeuing loop: Received task %s, sending to worker pool.", dequeuedTask.Id)
 				pool.Send(dequeuedTask)
 			}
 		}
